@@ -12,6 +12,9 @@ import PrivacyPolicyScreen from '../screens/app/PrivacyPolicyScreen';
 import TermsConditionsScreen from '../screens/app/TermsConditionsScreen';
 import AllPoojaTypesScreen from '../screens/app/AllPoojaTypesScreen';
 import OnlinePoojaScreen from '../screens/app/OnlinePoojaScreen';
+import AllPanditsScreen from '../screens/app/AllPanditsScreen';
+import PanditDetailScreen from '../screens/app/PanditDetailScreen';
+import ProfileSetupScreen from '../screens/auth/ProfileSetupScreen';
 import { colors } from '../theme/theme';
 
 const Tab = createBottomTabNavigator();
@@ -70,38 +73,28 @@ const TabNavigator: React.FC = () => {
 export const AppStack: React.FC = () => {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
+      {/* Main tabs */}
       <Stack.Screen name="Main" component={TabNavigator} />
-      <Stack.Screen 
-        name="FAQ" 
-        component={FAQScreen}
-        options={{ title: 'FAQs' }}
+
+      {/* Profile setup — accessible from OTP flow and Account edit */}
+      <Stack.Screen
+        name="ProfileSetup"
+        component={ProfileSetupScreen}
+        options={{ gestureEnabled: false }} // prevent swipe-back after OTP
       />
-      <Stack.Screen 
-        name="AboutUs" 
-        component={AboutUsScreen}
-        options={{ title: 'About Us' }}
-      />
-      <Stack.Screen 
-        name="RefundPolicy" 
-        component={RefundPolicyScreen}
-        options={{ title: 'Refund Policy' }}
-      />
-      <Stack.Screen 
-        name="PrivacyPolicy" 
-        component={PrivacyPolicyScreen}
-        options={{ title: 'Privacy Policy' }}
-      />
-      <Stack.Screen 
-        name="TermsConditions" 
-        component={TermsConditionsScreen}
-        options={{ title: 'Terms & Conditions' }}
-      />
-      <Stack.Screen 
-        name="AllPoojaTypes" 
-        component={AllPoojaTypesScreen}
-        options={{ title: 'All Pooja Types' }}
-      />
+
+      {/* Account screens */}
+      <Stack.Screen name="FAQ" component={FAQScreen} />
+      <Stack.Screen name="AboutUs" component={AboutUsScreen} />
+      <Stack.Screen name="RefundPolicy" component={RefundPolicyScreen} />
+      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+      <Stack.Screen name="TermsConditions" component={TermsConditionsScreen} />
+
+      {/* Pooja & Pandit screens */}
+      <Stack.Screen name="AllPoojaTypes" component={AllPoojaTypesScreen} />
       <Stack.Screen name="OnlinePooja" component={OnlinePoojaScreen} />
+      <Stack.Screen name="AllPandits" component={AllPanditsScreen} />
+      <Stack.Screen name="PanditDetail" component={PanditDetailScreen} />
     </Stack.Navigator>
   );
 };

@@ -8,38 +8,35 @@ import { colors } from '../../theme/theme';
 
 const { width, height } = Dimensions.get('window');
 
-type RootStackParamList = {
+type AuthStackParamList = {
   Splash: undefined;
   Onboarding: undefined;
-  Main: undefined;
+  Login: undefined;
 };
 
-type SplashScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Splash'>;
+type SplashNavProp = StackNavigationProp<AuthStackParamList, 'Splash'>;
 
 const SplashScreen: React.FC = () => {
-  const navigation = useNavigation<SplashScreenNavigationProp>();
+  const navigation = useNavigation<SplashNavProp>();
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Start fade-in animation
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 1000,
       useNativeDriver: true,
     }).start();
 
-    // Check for token after 2.5 seconds
     const timer = setTimeout(async () => {
       try {
         const token = await getToken();
         if (token) {
-          // User is logged in, navigate to main app
-          navigation.reset({
+          // ✅ Climb up to RootNavigator to reset to 'App'
+          navigation.getParent()?.reset({
             index: 0,
-            routes: [{ name: 'Main' }],
+            routes: [{ name: 'App' }],
           });
         } else {
-          // User not logged in, check if onboarding was seen
           navigation.replace('Onboarding');
         }
       } catch (error) {
@@ -55,12 +52,9 @@ const SplashScreen: React.FC = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <Animated.View style={[styles.logoContainer, { opacity: fadeAnim }]}>
-          {/* Pandit Icon Placeholder */}
           <View style={styles.iconPlaceholder}>
             <Text style={styles.iconText}>🙏</Text>
           </View>
-          
-          {/* App Name */}
           <Text style={styles.appName}>SmartPujari</Text>
           <Text style={styles.tagline}>Your Trusted Puja Partner</Text>
         </Animated.View>

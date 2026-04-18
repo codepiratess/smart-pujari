@@ -246,4 +246,36 @@ export const homeApi = {
       return homeMockApi.getNearbyPandits(params);
     }
   },
+
+  getPanditDetail: async (panditId: number): Promise<any> => {
+    try {
+      const { data: response } = await backendAxios.get(`/pandits/${panditId}`);
+      
+      if (!response.status || !response.data) {
+        console.warn('Unexpected pandit detail response shape:', response);
+        return null;
+      }
+      
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching pandit detail from backend:', error);
+      return null;
+    }
+  },
+
+  getPanditAddons: async (panditId: number): Promise<any[]> => {
+    try {
+      const { data: response } = await backendAxios.get(`/pandits/${panditId}/addons`);
+      
+      if (!response.success || !Array.isArray(response.data)) {
+        console.warn('Unexpected pandit addons response shape:', response);
+        return [];
+      }
+      
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching pandit addons from backend:', error);
+      return [];
+    }
+  },
 };

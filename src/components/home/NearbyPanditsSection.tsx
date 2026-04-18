@@ -37,8 +37,7 @@ const NearbyPanditsSection: React.FC<NearbyPanditsSectionProps> = ({
   const navigation = useNavigation<StackNavigationProp<any>>();
 
   const handleViewAllPress = () => {
-    // TODO: Navigate to AllPanditsScreen
-    console.log('View all pandits pressed');
+    navigation.navigate('AllPandits');
   };
 
   const handlePanditPress = (pandit: Pandit) => {
