@@ -105,13 +105,13 @@ const AccountScreen: React.FC = () => {
         Alert.alert('Change Location', 'Location change feature coming soon!');
         break;
       case 'Help & Support':
-        Alert.alert('Help & Support', 'Contact us at support@smartpujari.com');
+        navigation.navigate('FAQ');
         break;
       case 'FAQs':
         navigation.navigate('FAQ');
         break;
       case 'Terms & Conditions':
-        Alert.alert('Terms & Conditions', 'Terms & Conditions feature coming soon!');
+        navigation.navigate('TermsConditions');
         break;
       case 'Privacy Policy':
         navigation.navigate('PrivacyPolicy');

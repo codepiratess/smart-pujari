@@ -9,6 +9,9 @@ import FAQScreen from '../screens/app/FAQScreen';
 import AboutUsScreen from '../screens/app/AboutUsScreen';
 import RefundPolicyScreen from '../screens/app/RefundPolicyScreen';
 import PrivacyPolicyScreen from '../screens/app/PrivacyPolicyScreen';
+import TermsConditionsScreen from '../screens/app/TermsConditionsScreen';
+import AllPoojaTypesScreen from '../screens/app/AllPoojaTypesScreen';
+import OnlinePoojaScreen from '../screens/app/OnlinePoojaScreen';
 import { colors } from '../theme/theme';
 
 const Tab = createBottomTabNavigator();
@@ -88,6 +91,17 @@ export const AppStack: React.FC = () => {
         component={PrivacyPolicyScreen}
         options={{ title: 'Privacy Policy' }}
       />
+      <Stack.Screen 
+        name="TermsConditions" 
+        component={TermsConditionsScreen}
+        options={{ title: 'Terms & Conditions' }}
+      />
+      <Stack.Screen 
+        name="AllPoojaTypes" 
+        component={AllPoojaTypesScreen}
+        options={{ title: 'All Pooja Types' }}
+      />
+      <Stack.Screen name="OnlinePooja" component={OnlinePoojaScreen} />
     </Stack.Navigator>
   );
 };

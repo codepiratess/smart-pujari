@@ -1,48 +1,46 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   FlatList,
   TouchableOpacity,
   Text,
   StyleSheet,
-  Dimensions,
   Image,
-  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { colors } from '../../theme/theme';
+import { homeApi, PoojaType } from '../../api/homeApi';
 
-const { width } = Dimensions.get('window');
+interface PoojaTypesSectionProps {}
 
-interface PoojaType {
-  id: string;
-  name: string;
-  description: string;
-  image: string;
-  default_price?: string;
-  duration?: string;
-}
-
-interface PoojaTypesSectionProps {
-  poojaTypes: PoojaType[];
-  loading?: boolean;
-}
-
-const PoojaTypesSection: React.FC<PoojaTypesSectionProps> = ({
-  poojaTypes,
-  loading = false,
-}) => {
+const PoojaTypesSection: React.FC<PoojaTypesSectionProps> = () => {
   const navigation = useNavigation<StackNavigationProp<any>>();
+  const [poojaTypes, setPoojaTypes] = useState<PoojaType[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchPoojaTypes = async () => {
+      try {
+        setLoading(true);
+        const data = await homeApi.getPoojaTypes(4); // Limit to 4 for home screen
+        setPoojaTypes(data);
+      } catch (error) {
+        console.error('Error fetching pooja types:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPoojaTypes();
+  }, []);
 
   const handleViewAllPress = () => {
-    // TODO: Navigate to AllPoojaTypesScreen
-    console.log('View all pooja types pressed');
+    navigation.navigate('AllPoojaTypes');
   };
 
   const handlePoojaPress = (pooja: PoojaType) => {
-    // Navigate to PoojaDetailScreen
     navigation.navigate('PoojaDetail', { poojaId: pooja.id });
   };
 
@@ -54,8 +52,8 @@ const PoojaTypesSection: React.FC<PoojaTypesSectionProps> = ({
     >
       <View style={styles.imageContainer}>
         {item.image && item.image !== '' ? (
-          <Image 
-            source={{ uri: item.image }} 
+          <Image
+            source={{ uri: item.image }}
             style={styles.poojaImage}
             resizeMode="cover"
           />
@@ -69,23 +67,24 @@ const PoojaTypesSection: React.FC<PoojaTypesSectionProps> = ({
       <Text style={styles.description} numberOfLines={2}>
         {item.description}
       </Text>
-      
-      {/* Price and Duration Info */}
+
       <View style={styles.infoContainer}>
         {item.default_price && (
           <View style={styles.infoItem}>
             <Icon name="currency-rupee" size={12} color={colors.primary} />
-            <Text style={styles.infoText}>{item.default_price}</Text>
+            <Text style={styles.infoText}>
+              {parseFloat(item.default_price).toLocaleString()}
+            </Text>
           </View>
         )}
         {item.duration && (
           <View style={styles.infoItem}>
             <Icon name="schedule" size={12} color={colors.textSecondary} />
-            <Text style={styles.infoText}>{item.duration}</Text>
+            <Text style={styles.infoText}>{item.duration} hrs</Text>
           </View>
         )}
       </View>
-      
+
       <TouchableOpacity
         style={styles.viewDetailsButton}
         onPress={() => handlePoojaPress(item)}
@@ -134,7 +133,7 @@ const PoojaTypesSection: React.FC<PoojaTypesSectionProps> = ({
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContainer}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item.id.toString()}
       />
     </View>
   );
@@ -170,7 +169,7 @@ const styles = StyleSheet.create({
   },
   card: {
     width: 300,
-    height: 260,
+    height: 280,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 12,
@@ -186,13 +185,13 @@ const styles = StyleSheet.create({
   },
   poojaImage: {
     width: '100%',
-    height: 160,
+    height: 140,
     borderRadius: 8,
     backgroundColor: colors.background,
   },
   imagePlaceholder: {
     width: '100%',
-    height: 100,
+    height: 140,
     backgroundColor: colors.primary + '20',
     borderRadius: 8,
     justifyContent: 'center',
@@ -238,7 +237,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   loadingContainer: {
-    height: 260,
+    height: 280,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.background,

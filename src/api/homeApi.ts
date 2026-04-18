@@ -10,12 +10,18 @@ export interface Banner {
 }
 
 export interface PoojaType {
-  id: string;
+  id: number;
   name: string;
   description: string;
   image: string;
   default_price?: string;
   duration?: string;
+  status?: string;
+}
+
+// Extended interface for OnlinePoojaScreen compatibility
+export interface OnlinePoojaType extends PoojaType {
+  price?: number;
 }
 
 export interface Pandit {
@@ -74,45 +80,6 @@ interface PanditsApiResponse {
   };
 }
 
-const mapPandit = (item: PanditApiItem): Pandit => {
-  const profilePicture = item.profile_picture;
-  const photoUrl = profilePicture ? 
-    `http://13.232.175.231/storage/${profilePicture}` : undefined;
-  
-  // Debug logging
-  console.log('Pandit photo URL:', photoUrl);
-  
-  return {
-    id: String(item.id),
-    name: item.full_name,
-    experience: `${item.pandit_profile.experience_years} years experience`,
-    rating: item.pandit_profile.rating,
-    reviewCount: 0, // Backend doesn't provide review count
-    languages: item.pandit_profile.languages,
-    photo: photoUrl,
-    location: item.pandit_profile.operating_city || 'India',
-    services: [], // Backend doesn't provide services list
-  };
-};
-
-// Mock data (Banners & Pandits)
-const mockBanners: Banner[] = [
-  { id: '1', image: 'https://picsum.photos/seed/diwali/400/200',      title: 'Diwali Special Pooja',  link: '/diwali-pooja'    },
-  { id: '2', image: 'https://picsum.photos/seed/satyanarayan/400/200',title: 'Satyanarayan Katha',     link: '/satyanarayan'    },
-  { id: '3', image: 'https://picsum.photos/seed/ganesh/400/200',      title: 'Ganesh Chaturthi',       link: '/ganesh-chaturthi'},
-  { id: '4', image: 'https://picsum.photos/seed/navratri/400/200',    title: 'Navratri Pooja',         link: '/navratri'        },
-];
-
-const mockPandits: Pandit[] = [
-  { id: '1', name: 'Pandit Ramesh Sharma', experience: '10 years experience', rating: 4.8, reviewCount: 156, languages: ['Hindi', 'English', 'Sanskrit'], photo: 'https://picsum.photos/seed/pandit1/100/100', location: 'Delhi, India',     services: ['Satyanarayan Pooja', 'Ganesh Pooja', 'Lakshmi Pooja'] },
-  { id: '2', name: 'Pandit Suresh Patel',  experience: '8 years experience',  rating: 4.6, reviewCount: 98,  languages: ['Hindi', 'Gujarati'],             photo: 'https://picsum.photos/seed/pandit2/100/100', location: 'Mumbai, India',    services: ['Ganesh Pooja', 'Shiv Pooja', 'Durga Pooja']          },
-  { id: '3', name: 'Pandit Vijay Kumar',   experience: '15 years experience', rating: 4.9, reviewCount: 203, languages: ['Hindi', 'English', 'Tamil'],      photo: 'https://picsum.photos/seed/pandit3/100/100', location: 'Bangalore, India', services: ['Satyanarayan Pooja', 'Lakshmi Pooja', 'Navagraha Pooja'] },
-  { id: '4', name: 'Pandit Mahesh Joshi',  experience: '12 years experience', rating: 4.7, reviewCount: 142, languages: ['Hindi', 'Marathi', 'Sanskrit'],   photo: 'https://picsum.photos/seed/pandit4/100/100', location: 'Pune, India',      services: ['Satyanarayan Pooja', 'Ganesh Pooja', 'Shiv Pooja']    },
-  { id: '5', name: 'Pandit Amit Verma',    experience: '6 years experience',  rating: 4.5, reviewCount: 67,  languages: ['Hindi', 'English'],              photo: 'https://picsum.photos/seed/pandit5/100/100', location: 'Chennai, India',   services: ['Ganesh Pooja', 'Hanuman Pooja', 'Lakshmi Pooja']      },
-];
-
-// ─── Backend API response shape ───────────────────────────────────────────────
-
 interface PoojaTypeApiItem {
   id: number;
   name: string;
@@ -131,26 +98,81 @@ interface PoojaTypesApiResponse {
   data: PoojaTypeApiItem[];
 }
 
+const mapPandit = (item: PanditApiItem): Pandit => {
+  const profilePicture = item.profile_picture;
+  const photoUrl = profilePicture
+    ? `http://13.232.175.231/storage/${profilePicture}`
+    : undefined;
+
+  return {
+    id: String(item.id),
+    name: item.full_name,
+    experience: `${item.pandit_profile.experience_years} years experience`,
+    rating: item.pandit_profile.rating,
+    reviewCount: 0,
+    languages: item.pandit_profile.languages,
+    photo: photoUrl,
+    location: item.pandit_profile.operating_city || 'India',
+    services: [],
+  };
+};
+
 const mapPoojaType = (item: PoojaTypeApiItem): PoojaType => ({
-  id: String(item.id),
+  id: item.id,
   name: item.name,
   description: item.description,
   image: item.image,
   default_price: item.default_price,
   duration: item.duration,
+  status: item.status,
 });
 
-// ─── Dedicated axios instance → always hits the real backend ──────────────────
-// A separate instance avoids the Vite dev-server baseURL that apiClient uses,
-// and avoids the whatwg-fetch polyfill that caused "Network request failed" on iOS.
-// iOS ATS also requires the NSExceptionDomain entry in Info.plist (see snippet).
+// Backend API response shape for online poojas
+interface OnlinePoojaApiItem {
+  id: number;
+  name: string;
+  description: string;
+  duration: string;
+  price: string;
+  image: string;
+}
+
+interface OnlinePoojasApiResponse {
+  success: boolean;
+  message: string;
+  data: OnlinePoojaApiItem[];
+}
+
+const mapOnlinePooja = (item: OnlinePoojaApiItem): PoojaType => ({
+  id: item.id,
+  name: item.name,
+  description: item.description,
+  image: item.image,
+  default_price: item.price,
+  duration: item.duration,
+});
+
+// Mock data
+const mockBanners: Banner[] = [
+  { id: '1', image: 'https://picsum.photos/seed/diwali/400/200',       title: 'Diwali Special Pooja', link: '/diwali-pooja'     },
+  { id: '2', image: 'https://picsum.photos/seed/satyanarayan/400/200', title: 'Satyanarayan Katha',   link: '/satyanarayan'     },
+  { id: '3', image: 'https://picsum.photos/seed/ganesh/400/200',       title: 'Ganesh Chaturthi',     link: '/ganesh-chaturthi' },
+  { id: '4', image: 'https://picsum.photos/seed/navratri/400/200',     title: 'Navratri Pooja',       link: '/navratri'         },
+];
+
+const mockPandits: Pandit[] = [
+  { id: '1', name: 'Pandit Ramesh Sharma', experience: '10 years experience', rating: 4.8, reviewCount: 156, languages: ['Hindi', 'English', 'Sanskrit'], photo: 'https://picsum.photos/seed/pandit1/100/100', location: 'Delhi, India',     services: ['Satyanarayan Pooja', 'Ganesh Pooja', 'Lakshmi Pooja']    },
+  { id: '2', name: 'Pandit Suresh Patel',  experience: '8 years experience',  rating: 4.6, reviewCount: 98,  languages: ['Hindi', 'Gujarati'],             photo: 'https://picsum.photos/seed/pandit2/100/100', location: 'Mumbai, India',    services: ['Ganesh Pooja', 'Shiv Pooja', 'Durga Pooja']              },
+  { id: '3', name: 'Pandit Vijay Kumar',   experience: '15 years experience', rating: 4.9, reviewCount: 203, languages: ['Hindi', 'English', 'Tamil'],      photo: 'https://picsum.photos/seed/pandit3/100/100', location: 'Bangalore, India', services: ['Satyanarayan Pooja', 'Lakshmi Pooja', 'Navagraha Pooja'] },
+  { id: '4', name: 'Pandit Mahesh Joshi',  experience: '12 years experience', rating: 4.7, reviewCount: 142, languages: ['Hindi', 'Marathi', 'Sanskrit'],   photo: 'https://picsum.photos/seed/pandit4/100/100', location: 'Pune, India',      services: ['Satyanarayan Pooja', 'Ganesh Pooja', 'Shiv Pooja']       },
+  { id: '5', name: 'Pandit Amit Verma',    experience: '6 years experience',  rating: 4.5, reviewCount: 67,  languages: ['Hindi', 'English'],              photo: 'https://picsum.photos/seed/pandit5/100/100', location: 'Chennai, India',   services: ['Ganesh Pooja', 'Hanuman Pooja', 'Lakshmi Pooja']         },
+];
+
 const backendAxios = axios.create({
   baseURL: 'http://13.232.175.231/api/v1',
   timeout: 10000,
   headers: { 'Content-Type': 'application/json' },
 });
-
-// ─── Mock helpers (banners only) ──────────────────────────────────────────────
 
 const homeMockApi = {
   getBanners: async (): Promise<Banner[]> => {
@@ -163,13 +185,9 @@ const homeMockApi = {
   },
 };
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-const USE_MOCK_API = __DEV__;
-
 export const homeApi = {
   getBanners: async (): Promise<Banner[]> => {
-    if (USE_MOCK_API) return homeMockApi.getBanners();
+    if (__DEV__) return homeMockApi.getBanners();
     try {
       return await apiClient.get('/api/banners');
     } catch (error) {
@@ -178,13 +196,6 @@ export const homeApi = {
     }
   },
 
-  /**
-   * Uses a dedicated axios instance with the absolute backend URL.
-   * This fixes two problems:
-   *  1. The Vite dev server was intercepting relative URLs and returning HTML.
-   *  2. The whatwg-fetch polyfill was failing on iOS ("Network request failed").
-   * Requires NSExceptionDomain for 13.232.175.231 in ios/.../Info.plist.
-   */
   getPoojaTypes: async (limit?: number): Promise<PoojaType[]> => {
     try {
       const { data: response } = await backendAxios.get<PoojaTypesApiResponse>('/pooja-types');
@@ -202,9 +213,25 @@ export const homeApi = {
     }
   },
 
+  getOnlinePoojas: async (): Promise<PoojaType[]> => {
+    try {
+      const { data: response } = await backendAxios.get<OnlinePoojasApiResponse>('/online-poojas');
+
+      if (!response.success || !Array.isArray(response.data)) {
+        console.warn('Invalid response format from backend for online poojas');
+        return [];
+      }
+
+      const mapped = response.data.map(mapOnlinePooja);
+      return mapped;
+    } catch (error) {
+      console.error('Error fetching online poojas from backend:', error);
+      return [];
+    }
+  },
+
   getNearbyPandits: async (params: { lat: number; lng: number; limit?: number }): Promise<Pandit[]> => {
     try {
-      // Use the same backendAxios instance as getPoojaTypes for consistency
       const { data: response } = await backendAxios.get<PanditsApiResponse>('/pandits');
 
       if (!response.status || !Array.isArray(response.data.data)) {
@@ -216,7 +243,6 @@ export const homeApi = {
       return params.limit ? mapped.slice(0, params.limit) : mapped;
     } catch (error) {
       console.error('Error fetching pandits from backend:', error);
-      // Fallback to mock data if backend fails
       return homeMockApi.getNearbyPandits(params);
     }
   },

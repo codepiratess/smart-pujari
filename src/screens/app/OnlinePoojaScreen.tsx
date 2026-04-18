@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,594 +9,560 @@ import {
   TextInput,
   SafeAreaView,
   Alert,
+  Image,
+  Modal,
   FlatList,
+  Dimensions,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { Calendar } from 'react-native-calendars';
 import { colors } from '../../theme/theme';
-import { paymentApi, OnlinePoojaRequest, OnlinePoojaResponse } from '../../api/paymentApi';
-import { panditApi, TimeSlot } from '../../api/panditApi';
+import { homeApi, PoojaType } from '../../api/homeApi';
 
-interface PoojaType {
-  id: string;
-  name: string;
-  price: number;
-  duration: string;
-  image: string;
-  description: string;
+const { width } = Dimensions.get('window');
+
+// ── Fixed time slots (admin assigns pandit) ──────────────────────────────────
+const DEFAULT_SLOTS = [
+  { id: 1, start: '08:00', end: '10:00' },
+  { id: 2, start: '10:00', end: '12:00' },
+  { id: 3, start: '12:00', end: '14:00' },
+  { id: 4, start: '14:00', end: '16:00' },
+  { id: 5, start: '16:00', end: '18:00' },
+  { id: 6, start: '18:00', end: '20:00' },
+  { id: 7, start: '20:00', end: '22:00' },
+];
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+const formatTo12Hour = (time: string) => {
+  const [h, m] = time.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}:${m.toString().padStart(2, '0')} ${period}`;
+};
+
+const formatDisplayDate = (dateStr: string) => {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+const isPastDate = (date: Date) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date < today;
+};
+
+// ── Calendar Bottom Sheet Modal ───────────────────────────────────────────────
+interface CalendarModalProps {
+  visible: boolean;
+  onConfirm: (date: string, slot: string) => void;
+  onClose: () => void;
+  initialDate?: string | null;
 }
 
+const CalendarModal: React.FC<CalendarModalProps> = ({ visible, onConfirm, onClose, initialDate }) => {
+  const today = new Date();
+  const [calMonth, setCalMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [selectedDate, setSelectedDate] = useState<Date | null>(
+    initialDate ? new Date(initialDate) : null
+  );
+  const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
+
+  const year = calMonth.getFullYear();
+  const month = calMonth.getMonth();
+  const firstDayOfWeek = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const isSameDay = (a: Date | null, b: Date) => {
+    if (!a) return false;
+    return a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+  };
+
+  const handleConfirm = () => {
+    if (!selectedDate || selectedSlotId === null) return;
+    const slot = DEFAULT_SLOTS.find(s => s.id === selectedSlotId)!;
+    const dateStr = selectedDate.toISOString().split('T')[0];
+    const slotStr = `${slot.start} - ${slot.end}`;
+    onConfirm(dateStr, slotStr);
+  };
+
+  const canConfirm = !!selectedDate && selectedSlotId !== null;
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={modalStyles.overlay}>
+        <View style={modalStyles.sheet}>
+          {/* Month nav */}
+          <View style={modalStyles.monthRow}>
+            <TouchableOpacity
+              onPress={() => setCalMonth(new Date(year, month - 1, 1))}
+              style={modalStyles.navBtn}
+            >
+              <Icon name="chevron-left" size={22} color="#374151" />
+            </TouchableOpacity>
+            <Text style={modalStyles.monthTitle}>{MONTHS[month]} {year}</Text>
+            <TouchableOpacity
+              onPress={() => setCalMonth(new Date(year, month + 1, 1))}
+              style={modalStyles.navBtn}
+            >
+              <Icon name="chevron-right" size={22} color="#374151" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Day labels */}
+          <View style={modalStyles.dayLabelRow}>
+            {DAYS.map(d => (
+              <Text key={d} style={modalStyles.dayLabel}>{d}</Text>
+            ))}
+          </View>
+
+          {/* Calendar grid */}
+          <View style={modalStyles.calGrid}>
+            {Array.from({ length: firstDayOfWeek }).map((_, i) => (
+              <View key={`empty-${i}`} style={modalStyles.dayCell} />
+            ))}
+            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
+              const date = new Date(year, month, day);
+              const disabled = isPastDate(date);
+              const isSelected = isSameDay(selectedDate, date);
+              return (
+                <TouchableOpacity
+                  key={day}
+                  disabled={disabled}
+                  onPress={() => {
+                    setSelectedDate(date);
+                    setSelectedSlotId(null);
+                  }}
+                  style={[
+                    modalStyles.dayCell,
+                    isSelected && modalStyles.dayCellSelected,
+                  ]}
+                >
+                  <Text style={[
+                    modalStyles.dayText,
+                    disabled && modalStyles.dayTextDisabled,
+                    isSelected && modalStyles.dayTextSelected,
+                  ]}>
+                    {day}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Time Slots */}
+          {selectedDate && (
+            <>
+              <Text style={modalStyles.slotTitle}>Select Time Slot</Text>
+              <View style={modalStyles.slotGrid}>
+                {DEFAULT_SLOTS.map(slot => {
+                  const isSelected = selectedSlotId === slot.id;
+                  return (
+                    <TouchableOpacity
+                      key={slot.id}
+                      onPress={() => setSelectedSlotId(slot.id)}
+                      style={[modalStyles.slotBtn, isSelected && modalStyles.slotBtnSelected]}
+                    >
+                      <Text style={[modalStyles.slotText, isSelected && modalStyles.slotTextSelected]}>
+                        {formatTo12Hour(slot.start)} – {formatTo12Hour(slot.end)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
+          )}
+
+          {/* Confirm */}
+          <TouchableOpacity
+            onPress={handleConfirm}
+            disabled={!canConfirm}
+            style={[modalStyles.confirmBtn, !canConfirm && modalStyles.confirmBtnDisabled]}
+          >
+            <Text style={modalStyles.confirmBtnText}>Confirm Date & Time</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+// ── Main Screen ───────────────────────────────────────────────────────────────
 const OnlinePoojaScreen: React.FC = () => {
   const navigation = useNavigation<StackNavigationProp<any>>();
-  
+
   const [poojaTypes, setPoojaTypes] = useState<PoojaType[]>([]);
-  const [selectedPoojaTypes, setSelectedPoojaTypes] = useState<string[]>([]);
-  const [selectedDate, setSelectedDate] = useState('');
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState<TimeSlot | null>(null);
-  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
-  const [specialRequest, setSpecialRequest] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [loadingSlots, setLoadingSlots] = useState(false);
-  const [totalPrice, setTotalPrice] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedPooja, setSelectedPooja] = useState<number | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [showCalendar, setShowCalendar] = useState(false);
 
   useEffect(() => {
-    loadPoojaTypes();
-    
-    // Set today's date as default
-    const today = new Date().toISOString().split('T')[0];
-    setSelectedDate(today);
-    loadTimeSlots(today);
+    const fetch = async () => {
+      try {
+        setLoading(true);
+        const data = await homeApi.getPoojaTypes();
+        setPoojaTypes(data);
+      } catch (e) {
+        Alert.alert('Error', 'Unable to load pooja types');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetch();
   }, []);
 
-  useEffect(() => {
-    calculateTotalPrice();
-  }, [selectedPoojaTypes]);
+  const filtered = useMemo(() =>
+    poojaTypes.filter(p =>
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.description.toLowerCase().includes(searchQuery.toLowerCase())
+    ), [poojaTypes, searchQuery]);
 
-  const loadPoojaTypes = async () => {
-    try {
-      setLoading(true);
-      
-      // Mock pooja types for online pooja
-      const mockPoojaTypes: PoojaType[] = [
-        {
-          id: '1',
-          name: 'Satyanarayan Pooja',
-          price: 1500,
-          duration: '2 hours',
-          image: 'https://picsum.photos/seed/satyanarayan/100/100',
-          description: 'Traditional Satyanarayan pooja for prosperity and well-being',
-        },
-        {
-          id: '2',
-          name: 'Ganesh Pooja',
-          price: 800,
-          duration: '1 hour',
-          image: 'https://picsum.photos/seed/ganesh/100/100',
-          description: 'Lord Ganesh pooja for removing obstacles',
-        },
-        {
-          id: '3',
-          name: 'Lakshmi Pooja',
-          price: 1200,
-          duration: '1.5 hours',
-          image: 'https://picsum.photos/seed/lakshmi/100/100',
-          description: 'Goddess Lakshmi pooja for wealth and prosperity',
-        },
-        {
-          id: '4',
-          name: 'Shiv Pooja',
-          price: 1000,
-          duration: '1 hour',
-          image: 'https://picsum.photos/seed/shiv/100/100',
-          description: 'Lord Shiva pooja for peace and harmony',
-        },
-        {
-          id: '5',
-          name: 'Durga Pooja',
-          price: 1800,
-          duration: '2 hours',
-          image: 'https://picsum.photos/seed/durga/100/100',
-          description: 'Goddess Durga pooja for strength and protection',
-        },
-        {
-          id: '6',
-          name: 'Navagraha Pooja',
-          price: 2000,
-          duration: '2.5 hours',
-          image: 'https://picsum.photos/seed/navagraha/100/100',
-          description: 'Nine planets pooja for astrological remedies',
-        },
-      ];
-      
-      setPoojaTypes(mockPoojaTypes);
-    } catch (error) {
-      console.error('Error loading pooja types:', error);
-      Alert.alert('Error', 'Unable to load pooja types');
-    } finally {
-      setLoading(false);
+  const selectedPoojaData = poojaTypes.find(p => p.id === selectedPooja);
+  const totalPrice = selectedPoojaData ? parseFloat(selectedPoojaData.default_price || '0') : 0;
+  const hasDateTime = !!selectedDate && !!selectedSlot;
+
+  const toggleSelect = (id: number) => {
+    if (selectedPooja === id) {
+      setSelectedPooja(null);
+      setSelectedDate(null);
+      setSelectedSlot(null);
+    } else {
+      setSelectedPooja(id);
+      setSelectedDate(null);
+      setSelectedSlot(null);
     }
   };
 
-  const loadTimeSlots = async (date: string) => {
-    try {
-      setLoadingSlots(true);
-      const slots = await panditApi.getTimeSlots('online', date);
-      setTimeSlots(slots);
-      setSelectedTimeSlot(null);
-    } catch (error) {
-      console.error('Error loading time slots:', error);
-    } finally {
-      setLoadingSlots(false);
-    }
+  const handleDateTimeConfirm = (date: string, slot: string) => {
+    setSelectedDate(date);
+    setSelectedSlot(slot);
+    setShowCalendar(false);
   };
 
-  const calculateTotalPrice = () => {
-    const total = poojaTypes
-      .filter(pooja => selectedPoojaTypes.includes(pooja.id))
-      .reduce((sum, pooja) => sum + pooja.price, 0);
-    setTotalPrice(total);
+  const handleNext = () => {
+    if (!selectedPooja || !hasDateTime) return;
+    // Navigate to payment/cart
+    Alert.alert('Booking', `Pooja: ${selectedPoojaData?.name}\nDate: ${selectedDate}\nTime: ${selectedSlot}`);
   };
 
-  const handleDateSelect = (day: any) => {
-    const selectedDateStr = day.dateString;
-    setSelectedDate(selectedDateStr);
-    loadTimeSlots(selectedDateStr);
+  const formatSlotDisplay = (slot: string) => {
+    const [start, end] = slot.split(' - ');
+    return `${formatTo12Hour(start)} – ${formatTo12Hour(end)}`;
   };
-
-  const handlePoojaToggle = (poojaId: string) => {
-    setSelectedPoojaTypes(prev => {
-      if (prev.includes(poojaId)) {
-        return prev.filter(id => id !== poojaId);
-      } else {
-        return [...prev, poojaId];
-      }
-    });
-  };
-
-  const handleTimeSlotSelect = (slot: TimeSlot) => {
-    if (slot.status === 'available') {
-      setSelectedTimeSlot(slot);
-    }
-  };
-
-  const handleProceedToPay = async () => {
-    if (selectedPoojaTypes.length === 0) {
-      Alert.alert('Error', 'Please select at least one pooja type');
-      return;
-    }
-
-    if (!selectedTimeSlot) {
-      Alert.alert('Error', 'Please select a time slot');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      
-      const request: OnlinePoojaRequest = {
-        poojaTypes: selectedPoojaTypes,
-        date: selectedDate,
-        time: selectedTimeSlot.time,
-        specialRequest,
-        amount: totalPrice,
-      };
-
-      const response = await paymentApi.bookOnlinePooja(request);
-      
-      // Show success message
-      Alert.alert(
-        'Request Sent!',
-        response.message,
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack(),
-          },
-        ]
-      );
-    } catch (error) {
-      console.error('Error booking online pooja:', error);
-      Alert.alert('Error', 'Unable to book online pooja');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const renderPoojaType = ({ item }: { item: PoojaType }) => {
-    const isSelected = selectedPoojaTypes.includes(item.id);
-    
-    return (
-      <TouchableOpacity
-        style={[styles.poojaCard, isSelected && styles.selectedPoojaCard]}
-        onPress={() => handlePoojaToggle(item.id)}
-        activeOpacity={0.7}
-      >
-        <View style={styles.poojaImageContainer}>
-          <Icon name="spa" size={32} color={colors.primary} />
-        </View>
-        <View style={styles.poojaInfo}>
-          <Text style={styles.poojaName}>{item.name}</Text>
-          <Text style={styles.poojaDescription}>{item.description}</Text>
-          <View style={styles.poojaMeta}>
-            <Text style={styles.poojaDuration}>{item.duration}</Text>
-            <Text style={styles.poojaPrice}>${item.price}</Text>
-          </View>
-        </View>
-        <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
-          {isSelected && <Icon name="check" size={16} color="#FFFFFF" />}
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  const renderTimeSlot = (slot: TimeSlot) => {
-    const isSelected = selectedTimeSlot?.id === slot.id;
-    const slotColor = slot.status === 'available' ? colors.primary : 
-                     slot.status === 'booked' ? '#FF5252' : '#9E9E9E';
-    
-    return (
-      <TouchableOpacity
-        key={slot.id}
-        style={[
-          styles.timeSlot,
-          isSelected && styles.selectedTimeSlot,
-          { borderColor: slotColor }
-        ]}
-        onPress={() => handleTimeSlotSelect(slot)}
-        disabled={slot.status !== 'available'}
-        activeOpacity={0.7}
-      >
-        <Text style={[
-          styles.timeSlotText,
-          isSelected && styles.selectedTimeSlotText,
-          { color: slot.status === 'available' ? slotColor : slotColor }
-        ]}>
-          {slot.time}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
-
-  const markedDates = {
-    [selectedDate]: {
-      selected: true,
-      selectedColor: colors.primary,
-      selectedTextColor: '#FFFFFF',
-    },
-  };
-
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading pooja types...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-        >
-          <Icon name="arrow-back" size={24} color={colors.textPrimary} />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Icon name="arrow-back" size={22} color="#374151" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Book Online Pooja</Text>
-        <View style={styles.placeholder} />
+        <Text style={styles.headerTitle}>Online Pooja</Text>
+        <View style={{ width: 38 }} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Pooja Types Selection */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Select Pooja Types</Text>
-          <FlatList
-            data={poojaTypes}
-            renderItem={renderPoojaType}
-            keyExtractor={(item) => item.id}
-            scrollEnabled={false}
-          />
-        </View>
+      {/* Info Banner */}
+      <View style={styles.infoBanner}>
+        <Icon name="info-outline" size={15} color="#ea580c" />
+        <Text style={styles.infoText}>
+          Pandit will be assigned by admin after booking confirmation
+        </Text>
+      </View>
 
-        {/* Price Summary */}
-        {selectedPoojaTypes.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Price Summary</Text>
-            <View style={styles.priceSummary}>
-              <Text style={styles.totalPrice}>Total: ${totalPrice}</Text>
-              <Text style={styles.priceNote}>
-                {selectedPoojaTypes.length} pooja type{selectedPoojaTypes.length > 1 ? 's' : ''} selected
-              </Text>
-            </View>
+      {/* Search */}
+      <View style={styles.searchWrapper}>
+        <Icon name="search" size={18} color="#9ca3af" style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search pooja type"
+          placeholderTextColor="#9ca3af"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+      </View>
+
+      {/* List */}
+      {loading ? (
+        <View style={styles.loadingBox}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Loading poojas...</Text>
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {filtered.map(pooja => {
+            const isSelected = selectedPooja === pooja.id;
+            return (
+              <View key={pooja.id}>
+                {/* Pooja Card */}
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => toggleSelect(pooja.id)}
+                  style={[
+                    styles.card,
+                    isSelected && styles.cardSelected,
+                    isSelected && styles.cardSelectedBottom,
+                  ]}
+                >
+                  <Image source={{ uri: pooja.image }} style={styles.cardImage} />
+                  <View style={styles.cardInfo}>
+                    <Text style={styles.cardName} numberOfLines={1}>{pooja.name}</Text>
+                    <View style={styles.durationRow}>
+                      <Icon name="schedule" size={12} color="#6b7280" />
+                      <Text style={styles.durationText}>{pooja.duration}-2 hours</Text>
+                    </View>
+                    <Text style={styles.cardDesc} numberOfLines={2}>{pooja.description}</Text>
+                    <View style={styles.cardBottom}>
+                      <Text style={styles.cardPrice}>
+                        ₹{parseFloat(pooja.default_price || '0').toLocaleString()}
+                      </Text>
+                      <View style={[styles.selectBadge, isSelected && styles.selectBadgeActive]}>
+                        <Text style={[styles.selectBadgeText, isSelected && styles.selectBadgeTextActive]}>
+                          {isSelected ? 'Selected' : 'Select'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Expandable date/time panel */}
+                {isSelected && (
+                  <View style={styles.datePanel}>
+                    {hasDateTime ? (
+                      <View style={styles.datePanelConfirmed}>
+                        <View style={styles.datePanelInfo}>
+                          <View style={styles.dateRow}>
+                            <Icon name="event" size={14} color="#ea580c" />
+                            <Text style={styles.dateText}>{formatDisplayDate(selectedDate!)}</Text>
+                          </View>
+                          <View style={styles.dateRow}>
+                            <Icon name="schedule" size={14} color="#ea580c" />
+                            <Text style={styles.timeText}>{formatSlotDisplay(selectedSlot!)}</Text>
+                          </View>
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => setShowCalendar(true)}
+                          style={styles.editBtn}
+                        >
+                          <Icon name="edit" size={13} color="#f97316" />
+                          <Text style={styles.editBtnText}>Edit</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        onPress={() => setShowCalendar(true)}
+                        style={styles.selectDateBtn}
+                      >
+                        <Icon name="event" size={16} color="#f97316" />
+                        <Text style={styles.selectDateText}>Select Date & Time</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
+            );
+          })}
+          <View style={{ height: 100 }} />
+        </ScrollView>
+      )}
+
+      {/* Footer */}
+      {selectedPooja !== null && (
+        <View style={styles.footer}>
+          <View>
+            <Text style={styles.footerLabel}>1 pooja selected</Text>
+            <Text style={styles.footerPrice}>₹{totalPrice.toLocaleString()}</Text>
           </View>
-        )}
-
-        {/* Date Selection */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Select Date</Text>
-          <Calendar
-            onDayPress={handleDateSelect}
-            markedDates={markedDates}
-            minDate={new Date().toISOString().split('T')[0]}
-            theme={{
-              backgroundColor: '#FFFFFF',
-              calendarBackground: '#FFFFFF',
-              textSectionTitleColor: colors.textPrimary,
-              selectedDayBackgroundColor: colors.primary,
-              selectedDayTextColor: '#FFFFFF',
-              todayTextColor: colors.primary,
-              dayTextColor: colors.textPrimary,
-              textDisabledColor: colors.textSecondary,
-              arrowColor: colors.primary,
-            }}
-          />
-        </View>
-
-        {/* Time Slots */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Available Time Slots</Text>
-          {loadingSlots ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={styles.loadingText}>Loading time slots...</Text>
-            </View>
-          ) : timeSlots.length > 0 ? (
-            <View style={styles.timeSlotsContainer}>
-              {timeSlots.map(renderTimeSlot)}
-            </View>
+          {hasDateTime ? (
+            <TouchableOpacity onPress={handleNext} style={styles.nextBtn}>
+              <Text style={styles.nextBtnText}>Next</Text>
+            </TouchableOpacity>
           ) : (
-            <Text style={styles.noSlotsText}>No time slots available for this date</Text>
+            <TouchableOpacity onPress={() => setShowCalendar(true)} style={styles.nextBtn}>
+              <Icon name="event" size={15} color="#fff" />
+              <Text style={styles.nextBtnText}>Select Date & Time</Text>
+            </TouchableOpacity>
           )}
         </View>
+      )}
 
-        {/* Special Request */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Special Request (Optional)</Text>
-          <TextInput
-            style={styles.specialRequestInput}
-            placeholder="Any special requirements or preferences..."
-            placeholderTextColor={colors.textSecondary}
-            value={specialRequest}
-            onChangeText={setSpecialRequest}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-          />
-        </View>
-
-        {/* Bottom padding */}
-        <View style={styles.bottomPadding} />
-      </ScrollView>
-
-      {/* Proceed Button */}
-      <View style={styles.bottomBar}>
-        <TouchableOpacity
-          style={[
-            styles.proceedButton,
-            (selectedPoojaTypes.length === 0 || !selectedTimeSlot || loading) && styles.proceedButtonDisabled,
-          ]}
-          onPress={handleProceedToPay}
-          disabled={selectedPoojaTypes.length === 0 || !selectedTimeSlot || loading}
-          activeOpacity={0.8}
-        >
-          {loading ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={styles.proceedButtonText}>
-              Proceed to Pay ${totalPrice}
-            </Text>
-          )}
-        </TouchableOpacity>
-      </View>
+      {/* Calendar Modal */}
+      <CalendarModal
+        visible={showCalendar}
+        onConfirm={handleDateTimeConfirm}
+        onClose={() => setShowCalendar(false)}
+        initialDate={selectedDate}
+      />
     </SafeAreaView>
   );
 };
 
+// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 8,
-    fontSize: 16,
-    color: colors.textSecondary,
-  },
+  container: { flex: 1, backgroundColor: '#FFFDF9' },
+
+  // Header
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
   },
-  backButton: {
-    padding: 8,
+  backBtn: { padding: 8, borderRadius: 20 },
+  headerTitle: { fontSize: 17, fontWeight: '600', color: '#111827' },
+
+  // Info banner
+  infoBanner: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+    margin: 12, padding: 12,
+    backgroundColor: '#fff7ed', borderWidth: 1, borderColor: '#fed7aa', borderRadius: 12,
   },
-  headerTitle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    textAlign: 'center',
+  infoText: { flex: 1, fontSize: 12, color: '#9a3412', lineHeight: 18 },
+
+  // Search
+  searchWrapper: {
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: 12, marginBottom: 12,
+    paddingHorizontal: 14, paddingVertical: 10,
+    backgroundColor: '#fff', borderWidth: 1.5, borderColor: '#e5e7eb', borderRadius: 12,
   },
-  placeholder: {
-    width: 40,
+  searchIcon: { marginRight: 10 },
+  searchInput: { flex: 1, fontSize: 15, color: '#111827', paddingVertical: 0 },
+
+  // Loading
+  loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 10, color: '#6b7280', fontSize: 14 },
+
+  // Scroll
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 12, paddingTop: 4 },
+
+  // Card
+  card: {
+    flexDirection: 'row', backgroundColor: '#fff',
+    borderRadius: 16, borderWidth: 2, borderColor: '#f3f4f6',
+    marginBottom: 12, overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
   },
-  content: {
-    flex: 1,
+  cardSelected: { borderColor: '#f97316', shadowOpacity: 0.15 },
+  cardSelectedBottom: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, marginBottom: 0 },
+  cardImage: { width: 90, height: 90, borderRadius: 0 },
+  cardInfo: { flex: 1, padding: 10 },
+  cardName: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 3 },
+  durationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
+  durationText: { fontSize: 12, color: '#4b5563' },
+  cardDesc: { fontSize: 12, color: '#4b5563', lineHeight: 17, marginBottom: 6 },
+  cardBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cardPrice: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  selectBadge: {
+    paddingHorizontal: 14, paddingVertical: 4,
+    borderRadius: 999, backgroundColor: '#f3f4f6',
   },
-  section: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+  selectBadgeActive: { backgroundColor: '#ffedd5' },
+  selectBadgeText: { fontSize: 12, fontWeight: '600', color: '#4b5563' },
+  selectBadgeTextActive: { color: '#c2410c' },
+
+  // Date panel
+  datePanel: {
+    backgroundColor: '#fff7ed', borderWidth: 2, borderColor: '#f97316',
+    borderTopWidth: 1, borderTopColor: '#fed7aa',
+    borderBottomLeftRadius: 16, borderBottomRightRadius: 16,
+    marginBottom: 12, padding: 12,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginBottom: 16,
+  datePanelConfirmed: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  datePanelInfo: { gap: 4 },
+  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dateText: { fontSize: 13, fontWeight: '600', color: '#111827' },
+  timeText: { fontSize: 13, color: '#374151' },
+  editBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    borderWidth: 1.5, borderColor: '#f97316',
+    borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6,
   },
-  poojaCard: {
-    flexDirection: 'row',
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
+  editBtnText: { fontSize: 12, fontWeight: '600', color: '#c2410c' },
+  selectDateBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1.5, borderColor: '#f97316', borderStyle: 'dashed',
+    borderRadius: 12, padding: 12,
   },
-  selectedPoojaCard: {
-    backgroundColor: colors.primary + '15',
-    borderColor: colors.primary,
+  selectDateText: { fontSize: 13, fontWeight: '600', color: '#c2410c' },
+
+  // Footer
+  footer: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e5e7eb',
+    paddingHorizontal: 16, paddingVertical: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.06, elevation: 8,
   },
-  poojaImageContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
+  footerLabel: { fontSize: 12, color: '#4b5563', marginBottom: 2 },
+  footerPrice: { fontSize: 18, fontWeight: '700', color: '#111827' },
+  nextBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#f97316',
+    paddingHorizontal: 24, paddingVertical: 13, borderRadius: 999,
+    shadowColor: '#f97316', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, elevation: 4,
   },
-  poojaInfo: {
-    flex: 1,
+  nextBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+});
+
+// ── Modal Styles ──────────────────────────────────────────────────────────────
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
   },
-  poojaName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginBottom: 4,
+  sheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 20, paddingBottom: 32,
   },
-  poojaDescription: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 8,
-    lineHeight: 20,
+  monthRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  navBtn: { padding: 8, borderRadius: 20 },
+  monthTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
+
+  dayLabelRow: { flexDirection: 'row', marginBottom: 8 },
+  dayLabel: { flex: 1, textAlign: 'center', fontSize: 11, color: '#9ca3af', fontWeight: '600' },
+
+  calGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 },
+  dayCell: {
+    width: `${100 / 7}%`, aspectRatio: 1,
+    justifyContent: 'center', alignItems: 'center',
+    borderRadius: 10,
   },
-  poojaMeta: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  dayCellSelected: { backgroundColor: '#f97316' },
+  dayText: { fontSize: 13, color: '#111827' },
+  dayTextDisabled: { color: '#d1d5db' },
+  dayTextSelected: { color: '#fff', fontWeight: '700' },
+
+  slotTitle: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 10 },
+  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  slotBtn: {
+    width: '47%', padding: 10, borderRadius: 12,
+    borderWidth: 1.5, borderColor: '#e5e7eb',
+    backgroundColor: '#fff', alignItems: 'center',
   },
-  poojaDuration: {
-    fontSize: 12,
-    color: colors.textSecondary,
+  slotBtnSelected: { borderColor: '#f97316', backgroundColor: '#fff7ed' },
+  slotText: { fontSize: 12, color: '#374151' },
+  slotTextSelected: { color: '#c2410c', fontWeight: '600' },
+
+  confirmBtn: {
+    backgroundColor: '#f97316', paddingVertical: 14,
+    borderRadius: 999, alignItems: 'center',
   },
-  poojaPrice: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: colors.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 12,
-  },
-  checkboxSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  priceSummary: {
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-  },
-  totalPrice: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: colors.primary,
-    marginBottom: 4,
-  },
-  priceNote: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  timeSlotsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  timeSlot: {
-    width: '48%',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    marginBottom: 8,
-    backgroundColor: colors.background,
-  },
-  selectedTimeSlot: {
-    backgroundColor: colors.primary + '15',
-    borderWidth: 2,
-  },
-  timeSlotText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  selectedTimeSlotText: {
-    fontWeight: '600',
-  },
-  noSlotsText: {
-    textAlign: 'center',
-    color: colors.textSecondary,
-    fontStyle: 'italic',
-  },
-  specialRequestInput: {
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: colors.textPrimary,
-    borderWidth: 1,
-    borderColor: colors.border,
-    minHeight: 80,
-  },
-  bottomPadding: {
-    height: 100,
-  },
-  bottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  proceedButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  proceedButtonDisabled: {
-    backgroundColor: colors.border,
-  },
-  proceedButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  confirmBtnDisabled: { backgroundColor: '#e5e7eb' },
+  confirmBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });
 
 export default OnlinePoojaScreen;
