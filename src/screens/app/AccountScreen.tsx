@@ -200,7 +200,7 @@ const handleLogoutConfirm = async () => {
             <MenuItem
               icon="description"
               label="My Bookings"
-              onPress={() => navigate('MyBookings')}
+              onPress={() => navigate('Bookings')}
             />
             <MenuItem
               icon="star"
@@ -233,19 +233,12 @@ const handleLogoutConfirm = async () => {
             <MenuItem
               icon="location-on"
               label="Saved Addresses"
-              onPress={() =>
-                Alert.alert(
-                  'Saved Addresses',
-                  'Address management coming soon!',
-                )
-              }
+              onPress={() => navigate('SavedAddresses')}
             />
             <MenuItem
               icon="near-me"
               label="Change Location"
-              onPress={() =>
-                Alert.alert('Change Location', 'Location change coming soon!')
-              }
+              onPress={() => navigate('SelectLocation')}
             />
           </MenuSection>
 

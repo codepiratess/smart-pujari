@@ -575,10 +575,30 @@ const PanditDetailScreen: React.FC = () => {
           style={[styles.bookBtn, !selectedPoojaId && styles.bookBtnDisabled]}
           onPress={() => {
             if (!selectedPoojaId) return;
-            Alert.alert(
-              'Booking',
-              `Proceeding to book with Pandit ${pandit.full_name}`,
+            const selectedPooja = pandit.pandit_profile.poojas.find(
+              p => p.id === selectedPoojaId,
             );
+            if (!selectedPooja) return;
+
+            // Collect selected addons
+            const selectedAddonPayload = addons
+              .filter(a => (a.quantity ?? 0) > 0)
+              .map(a => ({
+                pandit_addon_id: a.pandit_addon_id,
+                quantity: a.quantity ?? 1,
+                price: parseFloat(a.price),
+              }));
+
+            navigation.navigate('BookPooja', {
+              panditId: pandit.id,
+              panditPoojaId: selectedPooja.id,
+              poojaName: selectedPooja.pooja_type?.name,
+              panditName: pandit.full_name,
+              duration: selectedPooja.duration,
+              basePrice: parseFloat(selectedPooja.price),
+              poojaImage: selectedPooja.pooja_type?.image,
+              selectedAddons: selectedAddonPayload,
+            });
           }}
           disabled={!selectedPoojaId}
         >

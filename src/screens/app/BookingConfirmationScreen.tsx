@@ -8,6 +8,7 @@ import {
   SafeAreaView,
   Share,
   Linking,
+  Alert,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -58,11 +59,11 @@ const BookingConfirmationScreen: React.FC = () => {
         await Linking.openURL(invoiceUrl);
       } else {
         // For demo, show alert
-        alert(`Invoice would be downloaded from: ${invoiceUrl}`);
+        Alert.alert('Invoice', `Invoice would be downloaded from: ${invoiceUrl}`);
       }
     } catch (error) {
       console.error('Error downloading invoice:', error);
-      alert('Unable to download invoice');
+      Alert.alert('Error', 'Unable to download invoice');
     }
   };
 

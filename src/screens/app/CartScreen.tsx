@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,628 +6,790 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  TextInput,
-  SafeAreaView,
   Alert,
+  Modal,
+  Switch,
+  Image,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { colors } from '../../theme/theme';
-import { paymentApi, CartItem, CartSummary } from '../../api/paymentApi';
+import { cartApi, Cart, CartItem } from '../../api/cartApi';
+
+// ─── Payment methods ──────────────────────────────────────────────────────────
+
+const PAYMENT_METHODS = [
+  { id: 'upi', label: 'UPI', emoji: '📱' },
+  { id: 'card', label: 'Credit / Debit Card', emoji: '💳' },
+  { id: 'netbanking', label: 'Net Banking', emoji: '🏦' },
+  { id: 'cash', label: 'Cash on Service', emoji: '💵' },
+];
+
+// Format time HH:MM → H:MM AM/PM
+const fmt = (t: string) => {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}:${String(m).padStart(2, '0')} ${suffix}`;
+};
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 const CartScreen: React.FC = () => {
   const navigation = useNavigation<StackNavigationProp<any>>();
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [cartSummary, setCartSummary] = useState<CartSummary | null>(null);
+
+  const [cart, setCart] = useState<Cart | null>(null);
   const [loading, setLoading] = useState(true);
-  const [updating, setUpdating] = useState<string | null>(null);
-  const [couponCode, setCouponCode] = useState('');
-  const [applyingCoupon, setApplyingCoupon] = useState(false);
-  const [userPoints, setUserPoints] = useState(0);
-  const [pointsToUse, setPointsToUse] = useState(0);
-  const [usingPoints, setUsingPoints] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('upi');
+  const [redeemPoints, setRedeemPoints] = useState(false);
+  const [proceeding, setProceeding] = useState(false);
 
-  useEffect(() => {
-    loadCartData();
-  }, []);
+  // Add-ons edit modal
+  const [addonsModalVisible, setAddonsModalVisible] = useState(false);
+  const [modalAddons, setModalAddons] = useState<any[]>([]);
+  const [savingAddons, setSavingAddons] = useState(false);
 
-  useEffect(() => {
-    calculateCartSummary();
-  }, [cartItems, couponCode, pointsToUse]);
+  // Calendar/date edit — reuse BookPooja
+  useFocusEffect(
+    useCallback(() => {
+      fetchCart();
+    }, []),
+  );
 
-  const loadCartData = async () => {
+  const fetchCart = async () => {
     try {
       setLoading(true);
-      const [items, points] = await Promise.all([
-        paymentApi.getCartItems(),
-        paymentApi.getUserPoints(),
-      ]);
-      setCartItems(items);
-      setUserPoints(points);
-    } catch (error) {
-      console.error('Error loading cart data:', error);
-      Alert.alert('Error', 'Unable to load cart data');
+      const data = await cartApi.getCart();
+      setCart(data);
+    } catch (err) {
+      console.error('Cart fetch error:', err);
+      Alert.alert('Error', 'Could not load cart.');
     } finally {
       setLoading(false);
     }
   };
 
-  const calculateCartSummary = async () => {
-    if (cartItems.length === 0) return;
-    
+  const openAddonsModal = (item: CartItem) => {
+    // Merge all addons from item (keep quantities)
+    const existing = item.addons ?? [];
+    setModalAddons(existing.map(a => ({ ...a, editQty: a.quantity })));
+    setAddonsModalVisible(true);
+  };
+
+  const changeModalAddonQty = (addonId: number, delta: number) => {
+    setModalAddons(prev =>
+      prev.map(a =>
+        a.addon_id === addonId
+          ? { ...a, editQty: Math.max(0, (a.editQty ?? a.quantity) + delta) }
+          : a,
+      ),
+    );
+  };
+
+  const saveAddons = async () => {
+    if (!cart?.items[0]) return;
+    setSavingAddons(true);
     try {
-      const summary = await paymentApi.getCartSummary(
-        cartItems, 
-        couponCode || undefined, 
-        usingPoints ? pointsToUse : undefined
+      await cartApi.updateCartAddons(
+        cart.items[0].item_id,
+        modalAddons.map(a => ({
+          pandit_addon_id: a.pandit_addon_id,
+          quantity: a.editQty ?? a.quantity,
+        })),
       );
-      setCartSummary(summary);
-    } catch (error) {
-      console.error('Error calculating cart summary:', error);
-    }
-  };
-
-  const updateQuantity = async (itemId: string, newQuantity: number) => {
-    if (newQuantity < 0) return;
-    
-    try {
-      setUpdating(itemId);
-      const updatedItems = await paymentApi.updateCartItem(itemId, newQuantity);
-      setCartItems(updatedItems);
-    } catch (error) {
-      console.error('Error updating quantity:', error);
-      Alert.alert('Error', 'Unable to update quantity');
+      setAddonsModalVisible(false);
+      fetchCart();
+    } catch (err: any) {
+      Alert.alert(
+        'Error',
+        err?.response?.data?.message || 'Failed to update add-ons.',
+      );
     } finally {
-      setUpdating(null);
+      setSavingAddons(false);
     }
   };
 
-  const removeItem = async (itemId: string) => {
+  const handleClearCart = () => {
+    Alert.alert('Clear Cart', 'Remove all items from cart?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await cartApi.clearCart();
+            navigation.goBack();
+          } catch {
+            Alert.alert('Error', 'Failed to clear cart.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleProceed = async () => {
+    setProceeding(true);
     try {
-      setUpdating(itemId);
-      const updatedItems = await paymentApi.removeCartItem(itemId);
-      setCartItems(updatedItems);
-    } catch (error) {
-      console.error('Error removing item:', error);
-      Alert.alert('Error', 'Unable to remove item');
+      const res = await cartApi.checkout(paymentMethod);
+      Alert.alert(
+        'Booking Confirmed! 🎉',
+        'Your pooja has been booked successfully.',
+        [
+          {
+            text: 'View Bookings',
+            onPress: () => navigation.navigate('Bookings'),
+          },
+          { text: 'Go Home', onPress: () => navigation.navigate('Home') },
+        ],
+      );
+    } catch (err: any) {
+      Alert.alert(
+        'Error',
+        err?.response?.data?.message || 'Payment failed. Please try again.',
+      );
     } finally {
-      setUpdating(null);
+      setProceeding(false);
     }
   };
 
-  const applyCoupon = async () => {
-    if (!couponCode.trim()) return;
-    
-    try {
-      setApplyingCoupon(true);
-      await calculateCartSummary();
-      Alert.alert('Success', 'Coupon applied successfully!');
-    } catch (error) {
-      console.error('Error applying coupon:', error);
-      Alert.alert('Error', 'Invalid coupon code');
-      setCouponCode('');
-    } finally {
-      setApplyingCoupon(false);
-    }
-  };
-
-  const handlePointsToggle = () => {
-    if (!usingPoints) {
-      setPointsToUse(Math.min(userPoints, Math.floor((cartSummary?.totalPayable || 0) * 0.1)));
-    } else {
-      setPointsToUse(0);
-    }
-    setUsingPoints(!usingPoints);
-  };
-
-  const handleProceedToPayment = () => {
-    if (cartItems.length === 0) {
-      Alert.alert('Error', 'Your cart is empty');
-      return;
-    }
-    
-    navigation.navigate('Payment', {
-      cartItems,
-      cartSummary,
-      couponCode: couponCode || undefined,
-      pointsUsed: usingPoints ? pointsToUse : 0,
-    });
-  };
-
-  const renderCartItem = (item: CartItem) => (
-    <View key={item.id} style={styles.cartItem}>
-      <View style={styles.itemInfo}>
-        <View style={styles.itemImageContainer}>
-          <Icon name={item.type === 'pooja' ? 'spa' : 'local-offer'} size={24} color={colors.primary} />
-        </View>
-        <View style={styles.itemDetails}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemPrice}>${item.price}</Text>
-        </View>
-      </View>
-      
-      <View style={styles.itemActions}>
-        <View style={styles.quantityControls}>
-          <TouchableOpacity
-            style={styles.quantityButton}
-            onPress={() => updateQuantity(item.id, item.quantity - 1)}
-            disabled={updating === item.id || item.quantity <= 1}
-            activeOpacity={0.7}
-          >
-            <Icon name="remove" size={16} color={colors.primary} />
-          </TouchableOpacity>
-          <Text style={styles.quantity}>{item.quantity}</Text>
-          <TouchableOpacity
-            style={styles.quantityButton}
-            onPress={() => updateQuantity(item.id, item.quantity + 1)}
-            disabled={updating === item.id}
-            activeOpacity={0.7}
-          >
-            <Icon name="add" size={16} color={colors.primary} />
-          </TouchableOpacity>
-        </View>
-        
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => removeItem(item.id)}
-          disabled={updating === item.id}
-          activeOpacity={0.7}
-        >
-          <Icon name="delete" size={20} color="#FF5252" />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  // ── Loading ────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+        <View style={styles.loadingBox}>
+          <ActivityIndicator size="large" color="#f97316" />
         </View>
       </SafeAreaView>
     );
   }
 
-  if (cartItems.length === 0) {
+  if (!cart || cart.items.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity
-            style={styles.backButton}
             onPress={() => navigation.goBack()}
-            activeOpacity={0.7}
+            style={styles.headerIconBtn}
           >
-            <Icon name="arrow-back" size={24} color={colors.textPrimary} />
+            <Icon name="home" size={22} color="#f97316" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Cart</Text>
-          <View style={styles.placeholder} />
+          <Text style={styles.headerTitle}>Your Cart</Text>
+          <View style={{ width: 38 }} />
         </View>
-        
-        <View style={styles.emptyContainer}>
-          <Icon name="shopping-cart" size={64} color={colors.textSecondary} />
+        <View style={styles.loadingBox}>
+          <Icon name="shopping-cart" size={52} color="#d1d5db" />
           <Text style={styles.emptyText}>Your cart is empty</Text>
-          <TouchableOpacity
-            style={styles.continueButton}
-            onPress={() => navigation.goBack()}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.continueButtonText}>Continue Shopping</Text>
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
+  const item = cart.items[0];
+  const pooja = item.pandit_pooja?.pooja_type;
+  const selectedAddons = item.addons ?? [];
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
+          onPress={() => navigation.navigate('Home')}
+          style={styles.headerIconBtn}
         >
-          <Icon name="arrow-back" size={24} color={colors.textPrimary} />
+          <Icon name="home" size={22} color="#f97316" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Cart</Text>
-        <View style={styles.placeholder} />
+        <Text style={styles.headerTitle}>Your Cart</Text>
+        <View style={{ width: 38 }} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Cart Items */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Items ({cartItems.length})</Text>
-          {cartItems.map(renderCartItem)}
-        </View>
-
-        {/* Price Breakdown */}
-        {cartSummary && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Price Breakdown</Text>
-            <View style={styles.priceBreakdown}>
-              <View style={styles.priceRow}>
-                <Text style={styles.priceLabel}>Base Price</Text>
-                <Text style={styles.priceValue}>${cartSummary.basePrice}</Text>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Booking summary */}
+        <View style={styles.card}>
+          <View style={styles.bookingTopRow}>
+            {pooja?.image ? (
+              <Image source={{ uri: pooja.image }} style={styles.bookingImg} />
+            ) : (
+              <View
+                style={[
+                  styles.bookingImg,
+                  {
+                    backgroundColor: '#ffedd5',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                  },
+                ]}
+              >
+                <Icon name="spa" size={28} color="#f97316" />
               </View>
-              <View style={styles.priceRow}>
-                <Text style={styles.priceLabel}>Add-on Total</Text>
-                <Text style={styles.priceValue}>${cartSummary.addonTotal}</Text>
-              </View>
-              <View style={styles.priceRow}>
-                <Text style={styles.priceLabel}>Platform Fee</Text>
-                <Text style={styles.priceValue}>${cartSummary.platformFee}</Text>
-              </View>
-              <View style={styles.priceRow}>
-                <Text style={styles.priceLabel}>Taxes (18% GST)</Text>
-                <Text style={styles.priceValue}>${cartSummary.taxes}</Text>
-              </View>
-              {cartSummary.discount > 0 && (
-                <View style={styles.priceRow}>
-                  <Text style={styles.discountLabel}>Discount</Text>
-                  <Text style={styles.discountValue}>-${cartSummary.discount}</Text>
-                </View>
-              )}
-              {cartSummary.pointsUsed > 0 && (
-                <View style={styles.priceRow}>
-                  <Text style={styles.pointsLabel}>Points Used</Text>
-                  <Text style={styles.pointsValue}>-${cartSummary.pointsUsed}</Text>
-                </View>
-              )}
-              <View style={[styles.priceRow, styles.totalRow]}>
-                <Text style={styles.totalLabel}>Total Payable</Text>
-                <Text style={styles.totalValue}>${cartSummary.totalPayable}</Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* Points Redemption */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Reward Points</Text>
-          <View style={styles.pointsContainer}>
-            <View style={styles.pointsInfo}>
-              <Text style={styles.availablePoints}>Available Points: {userPoints}</Text>
-              <Text style={styles.pointsNote}>Use points for up to 10% discount</Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.pointsToggle, usingPoints && styles.pointsToggleActive]}
-              onPress={handlePointsToggle}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.pointsToggleText, usingPoints && styles.pointsToggleTextActive]}>
-                {usingPoints ? `Using ${pointsToUse} points` : 'Use Points'}
+            )}
+            <View style={styles.bookingInfo}>
+              <Text style={styles.bookingName}>
+                {pooja?.name || item.meta?.pooja_name}
               </Text>
+              <View style={styles.bookingMetaRow}>
+                <Icon name="schedule" size={13} color="#6b7280" />
+                <Text style={styles.bookingMetaText}>
+                  {item.pandit_pooja?.duration} hours
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Date + time row */}
+          <View style={styles.dateTimeRow}>
+            <View style={styles.dateTimeLeft}>
+              <Icon name="calendar-today" size={14} color="#f97316" />
+              <Text style={styles.dateTimeText}>{item.meta?.date}</Text>
+              <Text style={styles.dateTimeDot}>•</Text>
+              <Icon name="schedule" size={14} color="#f97316" />
+              <Text style={styles.dateTimeText}>
+                {fmt(item.meta?.slot_start)} - {fmt(item.meta?.slot_end)}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Icon name="edit" size={18} color="#f97316" />
             </TouchableOpacity>
+          </View>
+
+          {/* Base price */}
+          <View style={styles.basePriceRow}>
+            <Text style={styles.basePriceLabel}>Base Price</Text>
+            <Text style={styles.basePriceValue}>{cart.base_price}</Text>
           </View>
         </View>
 
-        {/* Coupon Code */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Coupon Code</Text>
-          <View style={styles.couponContainer}>
-            <TextInput
-              style={styles.couponInput}
-              placeholder="Enter coupon code"
-              placeholderTextColor={colors.textSecondary}
-              value={couponCode}
-              onChangeText={setCouponCode}
-            />
+        {/* Add-ons */}
+        <View style={styles.card}>
+          <View style={styles.addonHeaderRow}>
+            <Text style={styles.cardTitle}>Selected Add-ons</Text>
             <TouchableOpacity
-              style={[styles.applyButton, !couponCode.trim() && styles.applyButtonDisabled]}
-              onPress={applyCoupon}
-              disabled={!couponCode.trim() || applyingCoupon}
-              activeOpacity={0.8}
+              style={styles.editAddonsBtn}
+              onPress={() => openAddonsModal(item)}
             >
-              {applyingCoupon ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.applyButtonText}>Apply</Text>
-              )}
+              <Icon name="edit" size={14} color="#374151" />
+              <Text style={styles.editAddonsBtnText}>Edit Addons</Text>
             </TouchableOpacity>
+          </View>
+
+          {selectedAddons.length === 0 ? (
+            <Text style={styles.emptyNote}>No add-ons selected</Text>
+          ) : (
+            selectedAddons.map((addon, i) => (
+              <View key={i} style={styles.addonRow}>
+                <Text style={styles.addonName}>{addon.addon_name}</Text>
+                <Text style={styles.addonPrice}>
+                  ₹{addon.total || addon.price * addon.quantity}
+                </Text>
+              </View>
+            ))
+          )}
+
+          <TouchableOpacity
+            style={styles.addMoreBtn}
+            onPress={() => openAddonsModal(item)}
+          >
+            <Text style={styles.addMoreBtnText}>+ Add More Add-ons</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Price Details */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Price Details</Text>
+          <View style={styles.priceRow}>
+            <Text style={styles.priceLabel}>Base Price</Text>
+            <Text style={styles.priceValue}>{cart.base_price}</Text>
+          </View>
+          <View style={styles.priceRow}>
+            <Text style={styles.priceLabel}>Add-ons Total</Text>
+            <Text style={styles.priceValue}>{cart.addons_total}</Text>
+          </View>
+          <View style={styles.priceRow}>
+            <Text style={styles.priceLabel}>Platform Fee</Text>
+            <Text style={styles.priceValue}>₹{cart.platform_fee}</Text>
+          </View>
+          <View style={styles.priceRow}>
+            <Text style={styles.priceLabel}>Taxes (GST 18%)</Text>
+            <Text style={styles.priceValue}>₹{cart.tax_amount}</Text>
+          </View>
+          {cart.discount_amount > 0 && (
+            <View style={styles.priceRow}>
+              <Text style={[styles.priceLabel, { color: '#16a34a' }]}>
+                Discount
+              </Text>
+              <Text style={[styles.priceValue, { color: '#16a34a' }]}>
+                -₹{cart.discount_amount}
+              </Text>
+            </View>
+          )}
+          <View style={styles.priceDivider} />
+          <View style={styles.priceRow}>
+            <Text style={styles.totalLabel}>Total Payable</Text>
+            <Text style={styles.totalValue}>₹{cart.total_payable}</Text>
           </View>
         </View>
 
-        {/* Bottom padding */}
-        <View style={styles.bottomPadding} />
+        {/* Payment Method */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Payment Method</Text>
+          {PAYMENT_METHODS.map(pm => (
+            <TouchableOpacity
+              key={pm.id}
+              style={[
+                styles.paymentOption,
+                paymentMethod === pm.id && styles.paymentOptionSelected,
+              ]}
+              onPress={() => setPaymentMethod(pm.id)}
+            >
+              <Text style={styles.paymentEmoji}>{pm.emoji}</Text>
+              <Text style={styles.paymentLabel}>{pm.label}</Text>
+              <View
+                style={[
+                  styles.paymentRadio,
+                  paymentMethod === pm.id && styles.paymentRadioSelected,
+                ]}
+              >
+                {paymentMethod === pm.id && (
+                  <View style={styles.paymentRadioInner} />
+                )}
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Coupon + Redeem */}
+        <View style={styles.card}>
+          <TouchableOpacity style={styles.couponRow}>
+            <View style={styles.couponIcon}>
+              <Icon name="local-offer" size={18} color="#f97316" />
+            </View>
+            <Text style={styles.couponLabel}>Apply Coupon</Text>
+            <Icon name="chevron-right" size={18} color="#9ca3af" />
+          </TouchableOpacity>
+
+          <View style={styles.priceDivider} />
+
+          <View style={styles.redeemRow}>
+            <View style={styles.couponIcon}>
+              <Icon name="card-giftcard" size={18} color="#f97316" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.couponLabel}>Redeem Points</Text>
+              <Text style={styles.redeemSub}>points available</Text>
+            </View>
+            <Switch
+              value={redeemPoints}
+              onValueChange={setRedeemPoints}
+              trackColor={{ false: '#e5e7eb', true: '#f97316' }}
+              thumbColor="#fff"
+            />
+          </View>
+        </View>
+
+        {/* Clear Cart */}
+        <TouchableOpacity onPress={handleClearCart} style={styles.clearBtn}>
+          <Text style={styles.clearBtnText}>Clear Cart</Text>
+        </TouchableOpacity>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Proceed Button */}
-      <View style={styles.bottomBar}>
-        <TouchableOpacity
-          style={styles.proceedButton}
-          onPress={handleProceedToPayment}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.proceedButtonText}>
-            Proceed to Payment ${cartSummary?.totalPayable || 0}
+      {/* Sticky footer */}
+      <View style={styles.footer}>
+        <View>
+          <Text style={styles.footerLabel}>Total Payable</Text>
+          <Text style={styles.footerPrice}>
+            ₹{cart.total_payable.toLocaleString()}
           </Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.proceedBtn, proceeding && { opacity: 0.7 }]}
+          onPress={handleProceed}
+          disabled={proceeding}
+        >
+          {proceeding ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={styles.proceedBtnText}>Proceed to Pay</Text>
+          )}
         </TouchableOpacity>
       </View>
+
+      {/* Edit Add-ons Modal */}
+      <Modal
+        visible={addonsModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setAddonsModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Available Add-ons</Text>
+              <TouchableOpacity onPress={() => setAddonsModalVisible(false)}>
+                <Icon name="close" size={22} color="#374151" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {modalAddons.map((addon, i) => (
+                <View key={i} style={styles.modalAddonCard}>
+                  <View style={styles.modalAddonTop}>
+                    <Text style={styles.modalAddonName}>
+                      {addon.addon_name}
+                    </Text>
+                    <Text style={styles.modalAddonPrice}>₹{addon.price}</Text>
+                  </View>
+                  {(addon.editQty ?? addon.quantity) > 0 ? (
+                    <View style={styles.qtyRow}>
+                      <TouchableOpacity
+                        style={styles.qtyBtn}
+                        onPress={() => changeModalAddonQty(addon.addon_id, -1)}
+                      >
+                        <Icon name="remove" size={18} color="#f97316" />
+                      </TouchableOpacity>
+                      <Text style={styles.qtyText}>
+                        {addon.editQty ?? addon.quantity}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.qtyBtn}
+                        onPress={() => changeModalAddonQty(addon.addon_id, 1)}
+                      >
+                        <Icon name="add" size={18} color="#f97316" />
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.addBtn}
+                      onPress={() => changeModalAddonQty(addon.addon_id, 1)}
+                    >
+                      <Icon name="add" size={16} color="#f97316" />
+                      <Text style={styles.addBtnText}>+ Add</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+              <View style={{ height: 16 }} />
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[
+                styles.confirmAddonsBtn,
+                savingAddons && { opacity: 0.7 },
+              ]}
+              onPress={saveAddons}
+              disabled={savingAddons}
+            >
+              {savingAddons ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.confirmAddonsBtnText}>Confirm Add-ons</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  loadingContainer: {
+  container: { flex: 1, backgroundColor: '#f9fafb' },
+  loadingBox: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 12,
   },
+  emptyText: { fontSize: 16, color: '#6b7280', marginTop: 8 },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  backButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    textAlign: 'center',
-  },
-  placeholder: {
-    width: 40,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  emptyText: {
-    fontSize: 18,
-    color: colors.textSecondary,
-    marginTop: 16,
-    marginBottom: 24,
-  },
-  continueButton: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 8,
-  },
-  continueButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  content: {
-    flex: 1,
-  },
-  section: {
-    padding: 16,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: '#f3f4f6',
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginBottom: 16,
+  headerIconBtn: { padding: 8 },
+  headerTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
+
+  scrollContent: { padding: 16 },
+
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
   },
-  cartItem: {
+  cardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 14,
+  },
+
+  // Booking
+  bookingTopRow: { flexDirection: 'row', gap: 12, marginBottom: 14 },
+  bookingImg: { width: 80, height: 80, borderRadius: 12 },
+  bookingInfo: { flex: 1, justifyContent: 'center' },
+  bookingName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 6,
+  },
+  bookingMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  bookingMetaText: { fontSize: 12, color: '#6b7280' },
+
+  dateTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff7ed',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  dateTimeLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    flex: 1,
+    flexWrap: 'wrap',
+  },
+  dateTimeDot: { color: '#6b7280' },
+  dateTimeText: { fontSize: 13, color: '#111827', fontWeight: '500' },
+
+  basePriceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
-  itemInfo: {
+  basePriceLabel: { fontSize: 13, color: '#6b7280' },
+  basePriceValue: { fontSize: 16, fontWeight: '700', color: '#f97316' },
+
+  // Add-ons
+  addonHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
+    justifyContent: 'space-between',
+    marginBottom: 14,
   },
-  itemImageContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  itemDetails: {
-    flex: 1,
-  },
-  itemName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: colors.textPrimary,
-    marginBottom: 4,
-  },
-  itemPrice: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  itemActions: {
+  editAddonsBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  quantityControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  quantityButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  quantity: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: colors.textPrimary,
-    marginHorizontal: 12,
-    minWidth: 20,
-    textAlign: 'center',
-  },
-  deleteButton: {
-    padding: 8,
-  },
-  priceBreakdown: {
-    backgroundColor: colors.background,
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#f3f4f6',
     borderRadius: 8,
-    padding: 16,
   },
+  editAddonsBtnText: { fontSize: 12, fontWeight: '600', color: '#374151' },
+  addonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+    marginBottom: 6,
+    paddingLeft: 12,
+  },
+  addonName: { fontSize: 14, color: '#111827', fontWeight: '500' },
+  addonPrice: { fontSize: 14, fontWeight: '700', color: '#f97316' },
+  emptyNote: { fontSize: 13, color: '#9ca3af', marginBottom: 12 },
+  addMoreBtn: {
+    borderWidth: 1.5,
+    borderColor: '#f97316',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  addMoreBtnText: { fontSize: 14, fontWeight: '600', color: '#f97316' },
+
+  // Price
   priceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  totalRow: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: 8,
-    marginTop: 8,
-  },
-  priceLabel: {
-    fontSize: 16,
-    color: colors.textSecondary,
-  },
-  priceValue: {
-    fontSize: 16,
-    color: colors.textPrimary,
-    fontWeight: '500',
-  },
-  discountLabel: {
-    fontSize: 16,
-    color: '#4CAF50',
-  },
-  discountValue: {
-    fontSize: 16,
-    color: '#4CAF50',
-    fontWeight: '500',
-  },
-  pointsLabel: {
-    fontSize: 16,
-    color: '#FF9800',
-  },
-  pointsValue: {
-    fontSize: 16,
-    color: '#FF9800',
-    fontWeight: '500',
-  },
-  totalLabel: {
-    fontSize: 18,
-    color: colors.textPrimary,
-    fontWeight: '600',
-  },
-  totalValue: {
-    fontSize: 18,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  pointsContainer: {
+  priceLabel: { fontSize: 14, color: '#6b7280' },
+  priceValue: { fontSize: 14, color: '#111827' },
+  priceDivider: { height: 1, backgroundColor: '#f3f4f6', marginVertical: 10 },
+  totalLabel: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  totalValue: { fontSize: 16, fontWeight: '700', color: '#f97316' },
+
+  // Payment
+  paymentOption: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 14,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#e5e7eb',
+    marginBottom: 10,
+    backgroundColor: '#fff',
   },
-  pointsInfo: {
-    flex: 1,
-  },
-  availablePoints: {
-    fontSize: 16,
-    color: colors.textPrimary,
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  pointsNote: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  pointsToggle: {
-    backgroundColor: colors.background,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  pointsToggleActive: {
-    backgroundColor: colors.primary + '15',
-    borderColor: colors.primary,
-  },
-  pointsToggleText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  pointsToggleTextActive: {
-    color: colors.primary,
-    fontWeight: '500',
-  },
-  couponContainer: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  couponInput: {
-    flex: 1,
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: colors.textPrimary,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  applyButton: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
+  paymentOptionSelected: { borderColor: '#f97316', backgroundColor: '#fff7ed' },
+  paymentEmoji: { fontSize: 20 },
+  paymentLabel: { flex: 1, fontSize: 14, fontWeight: '500', color: '#111827' },
+  paymentRadio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#d1d5db',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  applyButtonDisabled: {
-    backgroundColor: colors.border,
+  paymentRadioSelected: { borderColor: '#f97316' },
+  paymentRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#f97316',
   },
-  applyButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+
+  // Coupon / Redeem
+  couponRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 4,
   },
-  bottomPadding: {
-    height: 100,
-  },
-  bottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  proceedButton: {
-    backgroundColor: '#FF6B35',
-    paddingVertical: 16,
-    borderRadius: 8,
+  couponIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#fff7ed',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  proceedButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+  couponLabel: { flex: 1, fontSize: 14, fontWeight: '600', color: '#111827' },
+  redeemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 4,
   },
+  redeemSub: { fontSize: 11, color: '#6b7280', marginTop: 2 },
+
+  // Clear
+  clearBtn: { alignItems: 'center', paddingVertical: 16 },
+  clearBtnText: { fontSize: 14, fontWeight: '600', color: '#ef4444' },
+
+  // Footer
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.06,
+    elevation: 8,
+  },
+  footerLabel: { fontSize: 12, color: '#6b7280', marginBottom: 2 },
+  footerPrice: { fontSize: 20, fontWeight: '700', color: '#f97316' },
+  proceedBtn: {
+    backgroundColor: '#f97316',
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 999,
+    shadowColor: '#f97316',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    elevation: 4,
+  },
+  proceedBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+
+  // Addons modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 20,
+    maxHeight: '85%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  modalTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
+  modalAddonCard: {
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+  modalAddonTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  modalAddonName: { fontSize: 15, fontWeight: '600', color: '#111827' },
+  modalAddonPrice: { fontSize: 15, fontWeight: '600', color: '#111827' },
+  qtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff7ed',
+    borderRadius: 10,
+    paddingVertical: 4,
+  },
+  qtyBtn: { padding: 10 },
+  qtyText: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderWidth: 1.5,
+    borderColor: '#f97316',
+    borderRadius: 10,
+  },
+  addBtnText: { fontSize: 14, fontWeight: '600', color: '#f97316' },
+  confirmAddonsBtn: {
+    backgroundColor: '#f97316',
+    paddingVertical: 16,
+    borderRadius: 999,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  confirmAddonsBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
 });
 
 export default CartScreen;

@@ -14,8 +14,16 @@ import AllPoojaTypesScreen from '../screens/app/AllPoojaTypesScreen';
 import OnlinePoojaScreen from '../screens/app/OnlinePoojaScreen';
 import AllPanditsScreen from '../screens/app/AllPanditsScreen';
 import PanditDetailScreen from '../screens/app/PanditDetailScreen';
+import PoojaDetailScreen from '../screens/app/PoojaDetailScreen';
+import BookPoojaScreen from '../screens/app/BookPoojaScreen';
+import CartScreen from '../screens/app/CartScreen';
 import ProfileSetupScreen from '../screens/auth/ProfileSetupScreen';
+import SavedAddressesScreen from '../screens/app/SavedAddressesScreen';
+import AddressFormScreen    from '../screens/app/AddressFormScreen';
+import SelectLocationScreen from '../screens/app/SelectLocationScreen';
 import { colors } from '../theme/theme';
+import NotificationsScreen from '../screens/app/NotificationsScreen';
+import MyBookingsScreen from '../screens/app/MyBookingsScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -76,25 +84,36 @@ export const AppStack: React.FC = () => {
       {/* Main tabs */}
       <Stack.Screen name="Main" component={TabNavigator} />
 
-      {/* Profile setup — accessible from OTP flow and Account edit */}
-      <Stack.Screen
-        name="ProfileSetup"
-        component={ProfileSetupScreen}
-        options={{ gestureEnabled: false }} // prevent swipe-back after OTP
-      />
+      {/* Auth */}
+      <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} options={{ gestureEnabled: false }} />
 
-      {/* Account screens */}
+      {/* Pooja flow */}
+      <Stack.Screen name="AllPoojaTypes" component={AllPoojaTypesScreen} />
+      <Stack.Screen name="PoojaDetail" component={PoojaDetailScreen} />
+      <Stack.Screen name="BookPooja" component={BookPoojaScreen} />
+      <Stack.Screen name="Cart" component={CartScreen} />
+
+      {/* Pandit flow */}
+      <Stack.Screen name="AllPandits" component={AllPanditsScreen} />
+      <Stack.Screen name="PanditDetail" component={PanditDetailScreen} />
+
+      {/* Online Pooja */}
+      <Stack.Screen name="OnlinePooja" component={OnlinePoojaScreen} />
+
+      {/* Address */}
+      <Stack.Screen name="SavedAddresses" component={SavedAddressesScreen} />
+      <Stack.Screen name="AddressForm" component={AddressFormScreen} />
+      <Stack.Screen name="SelectLocation" component={SelectLocationScreen} />
+
+      {/* Account pages */}
       <Stack.Screen name="FAQ" component={FAQScreen} />
       <Stack.Screen name="AboutUs" component={AboutUsScreen} />
       <Stack.Screen name="RefundPolicy" component={RefundPolicyScreen} />
       <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
       <Stack.Screen name="TermsConditions" component={TermsConditionsScreen} />
 
-      {/* Pooja & Pandit screens */}
-      <Stack.Screen name="AllPoojaTypes" component={AllPoojaTypesScreen} />
-      <Stack.Screen name="OnlinePooja" component={OnlinePoojaScreen} />
-      <Stack.Screen name="AllPandits" component={AllPanditsScreen} />
-      <Stack.Screen name="PanditDetail" component={PanditDetailScreen} />
+      <Stack.Screen name="Notifications" component={NotificationsScreen} />
+      <Stack.Screen name="MyBookings" component={MyBookingsScreen} />
     </Stack.Navigator>
   );
 };
